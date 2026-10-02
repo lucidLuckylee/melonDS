@@ -438,8 +438,7 @@ void EmuThread::run()
                     ffFrames = 0;
                     ffMeasureTime = time;
 
-                    QScreen* screen = emuInstance->getMainWindow()->screen();
-                    int refreshRate = screen ? (int)round(screen->refreshRate()) : 0;
+                    int refreshRate = emuInstance->getMainWindow()->screenRefreshRate;
                     if (refreshRate <= 0) refreshRate = 60;
 
                     if (!globalCfg.GetBool("Video.FastForwardFrameskip"))

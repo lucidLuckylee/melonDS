@@ -2130,6 +2130,10 @@ void MainWindow::onTitleUpdate(QString title)
 {
     if (!emuInstance) return;
 
+    // QWidget::screen() is not for the emu thread, so the rate is cached here, on each title update
+    QScreen* scr = screen();
+    screenRefreshRate = scr ? (int)round(scr->refreshRate()) : 0;
+
     int numinst = numEmuInstances();
     int numwin = emuInstance->getNumWindows();
     if ((numinst > 1) && (numwin > 1))

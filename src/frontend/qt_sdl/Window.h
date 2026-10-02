@@ -226,6 +226,7 @@ public:
     ScreenPanel* panel;
 
     bool hasMenu;
+    int screenRefreshRate = 0;  // display refresh rate, read by the emu thread's frameskip (0 = unknown)
 
     QAction* actOpenROM;
     QAction* actBootFirmware;

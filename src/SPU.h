@@ -262,9 +262,6 @@ public:
     // outFrames so sound effects keep their pitch during fast-forward/slow-mo.
     // The ratio is lowered to what the ring holds when the emulator falls short of it.
     int ReadOutputStretched(s16* data, int outFrames, double speedRatio);
-    // frames produced per frame read by ReadOutput/ReadOutputStretched over the last ~0.25 s of output:
-    // the speed the emulator achieves relative to the output
-    double GetProducedRatio() const;
 
     void SetOutputSampleRate(double rate);
     void SetOutputSkew(double skew);
@@ -288,8 +285,6 @@ public:
 
 private:
     void GrowOutputBuffer(u32 minFrames);
-    int ReadRing(s16* data, int samples);
-    void CountRead(int frames);
 
     u32 OutputBufferSize = 0;
     double OutputSampleRate;
@@ -301,11 +296,6 @@ private:
     std::vector<s16> StretchScratch;
     bool Stretching = false;        // the last ReadOutputStretched call stretched
     bool StretchInit = true;        // InitOutput ran: the stretcher is set up for the output rate before its next use
-
-    // under AudioLock: frames buffered and read in the current window, and the last window's ratio
-    u32 FramesProduced = 0;
-    u32 FramesRead = 0;
-    double ProducedRatio = 1.0;
 
     blip_t* BlipLeft;
     blip_t* BlipRight;

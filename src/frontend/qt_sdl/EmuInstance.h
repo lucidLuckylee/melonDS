@@ -321,6 +321,7 @@ private:
     bool audioMutedToggle;
     bool audioMutedByFastForward;
     bool audioMutedByWindowFocus;
+    bool audioFastForwardStretch = false;  // Audio.FastForwardStretch and Audio.RealtimeBGM, see updateRealtimeBgmSettings
     SDL_cond* audioSyncCond;
     SDL_mutex* audioSyncLock;
 

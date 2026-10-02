@@ -170,8 +170,7 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
     // while fast-forwarding, time-stretch the SPU output (sound effects/cries; BGM is
     // handled separately below) so it plays faster at its original pitch instead of
     // being chopped by the ring buffer overwriting itself; it belongs to the real-time BGM feature
-    bool stretch = (inst->curFPS > inst->targetFPS) && inst->globalCfg.GetBool("Audio.FastForwardStretch")
-        && inst->globalCfg.GetBool("Audio.RealtimeBGM");
+    bool stretch = (inst->curFPS > inst->targetFPS) && inst->audioFastForwardStretch;
 
     int len_in, num_in;
     SDL_LockMutex(inst->audioSyncLock);
@@ -549,6 +548,9 @@ void EmuInstance::audioUpdateSettings()
 
 void EmuInstance::updateRealtimeBgmSettings()
 {
+    // cached for the audio callback
+    audioFastForwardStretch = globalCfg.GetBool("Audio.FastForwardStretch") && globalCfg.GetBool("Audio.RealtimeBGM");
+
     if (nds == nullptr) return;
 
     nds->SndTracker.Settings.Enabled = globalCfg.GetBool("Audio.RealtimeBGM");

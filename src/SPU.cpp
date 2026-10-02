@@ -1075,7 +1075,6 @@ void SPU::BufferAudio()
     blip_read_samples(BlipRight, temp + 1, avail, true);
 
     Platform::Mutex_Lock(AudioLock);
-    FramesProduced += avail;
     for (int i = 0; i < avail * 2; i += 2)
     {
         OutputBuffer[OutputBufferWritePos++] = temp[i];
@@ -1140,9 +1139,6 @@ void SPU::InitOutput()
 
     // a reset/rate change invalidates any audio the stretcher has buffered; the audio thread sets it up anew
     StretchInit = true;
-    FramesProduced = 0;
-    FramesRead = 0;
-    ProducedRatio = 1.0;
 
     Platform::Mutex_Unlock(AudioLock);
 }
@@ -1224,30 +1220,9 @@ void SPU::Sync(bool wait)
     }
 }
 
-// under AudioLock
-void SPU::CountRead(int frames)
-{
-    FramesRead += frames;
-    if (FramesRead >= OutputSampleRate / 4)
-    {
-        ProducedRatio = (double) FramesProduced / FramesRead;
-        FramesProduced = 0;
-        FramesRead = 0;
-    }
-}
-
-double SPU::GetProducedRatio() const
-{
-    Platform::Mutex_Lock(AudioLock);
-    double ratio = ProducedRatio;
-    Platform::Mutex_Unlock(AudioLock);
-    return ratio;
-}
-
 int SPU::ReadOutput(s16* data, int samples)
 {
     Platform::Mutex_Lock(AudioLock);
-    CountRead(samples);
     // fast-forward just ended: what the stretched reads left in the ring would play late at 1x
     // (and hold up audio sync), so keep only the newest callback's worth
     if (Stretching)
@@ -1257,13 +1232,7 @@ int SPU::ReadOutput(s16* data, int samples)
         if (((OutputBufferWritePos - OutputBufferReadPos) & mask) > (u32)samples * 2)
             OutputBufferReadPos = (OutputBufferWritePos - samples * 2) & mask;
     }
-    Platform::Mutex_Unlock(AudioLock);
-    return ReadRing(data, samples);
-}
 
-int SPU::ReadRing(s16* data, int samples)
-{
-    Platform::Mutex_Lock(AudioLock);
     if (OutputBufferReadPos == OutputBufferWritePos)
     {
         Platform::Mutex_Unlock(AudioLock);
@@ -1309,7 +1278,6 @@ int SPU::ReadOutputStretched(s16* data, int outFrames, double speedRatio)
     double ratio = std::min(speedRatio, std::max(1.0, (double) (avail - outFrames) / outFrames));
     int got = std::min(avail, (int) std::ceil(outFrames * ratio));
 
-    CountRead(outFrames);
     for (int i = 0; i < got * 2; i++)
     {
         StretchScratch[i] = OutputBuffer[OutputBufferReadPos++];
