@@ -304,6 +304,12 @@ void SndCmdTracker::HandleCommand(u32 id, u32 a0, u32 a1, u32 a2, u32 a3)
             Bgm.Start(Bgm.Tick() + a1);
             if (P[a0].Paused) Bgm.Pause(true);
         }
+        // a parked voice cannot follow; the resume re-adopts the player from the driver's tick
+        else if (a0 < 16 && P[a0].Parked)
+        {
+            Bgm.DropParked((int)a0);
+            P[a0].Parked = false;
+        }
         break;
 
     case CMD_PLAYER_PARAM:
@@ -627,6 +633,9 @@ bool SndCmdTracker::UnparkHost(int player)
     }
     if (SharedWork)
     {
+        // local variables set while parked were not forwarded
+        for (int i = 0; i < 16; i++)
+            Bgm.SetVariable((u8)i, (s16)RamRead32(SharedWork + 0x20 + player * 36 + i * 2));
         for (int i = 0; i < 16; i++)
             Bgm.SetVariable((u8)(16 + i), (s16)RamRead32(SharedWork + SHARED_GLOBAL_VAR_OFS + i * 2));
     }

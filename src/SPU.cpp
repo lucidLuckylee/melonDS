@@ -1,5 +1,5 @@
 /*
-    Copyright 2016-2025 melonDS team
+    Copyright 2016-2026 melonDS team
 
     This file is part of melonDS.
 
@@ -227,6 +227,12 @@ SPU::SPU(melonDS::NDS& nds, AudioBitDepth bitdepth, AudioInterpolation interpola
 
 SPU::~SPU()
 {
+    if (OutputBuffer != nullptr)
+    {
+        free(OutputBuffer);
+        OutputBuffer = nullptr;
+    }
+
     Platform::Mutex_Free(AudioLock);
     AudioLock = nullptr;
     blip_delete(BlipLeft);
@@ -242,7 +248,7 @@ void SPU::Reset()
     Cnt = 0;
     MasterVolume = 0;
     Bias = 0;
-    Mute = false;
+    Mute = true;
 
     for (int i = 0; i < 16; i++)
         Channels[i].Reset();
@@ -882,7 +888,7 @@ void SPU::Mix(u32 spucycles)
 {
     s32 left = 0, right = 0;
     s32 leftoutput = 0, rightoutput = 0;
-    // NelonDS: channels playing BGM that the host renderer replaces; they keep running but are silent
+    // RealtimeBGM: channels playing BGM that the host renderer replaces; they keep running but are silent
     u16 mutemask = NDS.SndTracker.MuteMask();
     u16 mutedplayers = NDS.SndTracker.MutedPlayers();
     auto muted = [mutemask, mutedplayers](const SPUChannel& chan)

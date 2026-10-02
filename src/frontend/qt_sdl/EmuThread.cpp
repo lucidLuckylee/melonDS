@@ -152,6 +152,7 @@ void EmuThread::run()
     u32 ffFrames = 0;
     double ffMeasureTime = lastTime;
     double ffLogTime = lastTime;
+    int ffRenderEveryN = 1;
 
     emuInstance->fastForwardToggled = false;
     emuInstance->slowmoToggled = false;
@@ -365,6 +366,7 @@ void EmuThread::run()
             if (fastforward && !enablefastforward)
             {
                 // show an up to date picture right away
+                ffRenderEveryN = 1;
                 emuInstance->nds->GPU.SetFrameSkip(1);
                 emuInstance->nds->GPU.ForceRenderNextFrame();
             }
@@ -440,9 +442,19 @@ void EmuThread::run()
                     int refreshRate = screen ? (int)round(screen->refreshRate()) : 0;
                     if (refreshRate <= 0) refreshRate = 60;
 
-                    int ffRenderEveryN = 1;
-                    if (globalCfg.GetBool("Video.FastForwardFrameskip"))
-                        ffRenderEveryN = std::clamp((int)round(ffFPS / refreshRate), 1, 8);
+                    if (!globalCfg.GetBool("Video.FastForwardFrameskip"))
+                        ffRenderEveryN = 1;
+                    else
+                    {
+                        // draw one emulated frame per display refresh: round the ratio up, with a dead band
+                        // so a ratio near an integer does not flip the choice every measurement
+                        double ratio = ffFPS / refreshRate;
+                        if (ratio > ffRenderEveryN + 0.15)
+                            ffRenderEveryN = (int)ceil(ratio - 0.15);
+                        else if (ratio < ffRenderEveryN - 0.85)
+                            ffRenderEveryN = (int)ceil(ratio - 0.15);
+                        ffRenderEveryN = std::clamp(ffRenderEveryN, 1, 8);
+                    }
                     emuInstance->nds->GPU.SetFrameSkip(ffRenderEveryN);
 
                     if (time - ffLogTime >= 2.0)

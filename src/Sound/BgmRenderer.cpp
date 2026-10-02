@@ -435,6 +435,9 @@ void BgmRenderer::Park(int key)
     slot.V.Ply->SetPaused(true);
     for (auto& chn : slot.V.Ply->channels)
         chn.Kill();
+    // the fade the host still had queued is over in the driver; the resume continues from its target
+    slot.V.ResetFader(slot.Params.ExtFader);
+    slot.V.ApplyFader();
     P->Parked.push_back(std::move(slot));
     if (P->Parked.size() > MaxParked)
         P->Parked.erase(P->Parked.begin());
