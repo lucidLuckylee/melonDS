@@ -174,6 +174,40 @@ struct SongParams
     u16 ChannelMask = 0xFFFF;  // survives Load()
 };
 
+// What decides how the sequence goes on: the tracks (positions, stacks, waits, parameters), variables and
+// tempo, compared as raw bytes. Once a song has looped it repeats every loop period, which lets a seek skip
+// whole periods.
+struct SeqState
+{
+    u32 Jumps;   // the tracks that jumped back at this tick
+    u32 Tick;
+    u8 Tracks[sizeof(SP::Player::tracks)];
+    u8 TrackIds[sizeof(SP::Player::trackIds)];
+    s16 Variables[32];
+    u16 Tempo;
+    s16 MasterVol;
+    u8 NTracks;
+
+    void Save(const SP::Player& ply)
+    {
+        Jumps = ply.loopJumps;
+        Tick = ply.tickCounter;
+        memcpy(Tracks, (const void*)ply.tracks, sizeof(Tracks));
+        memcpy(TrackIds, ply.trackIds, sizeof(TrackIds));
+        memcpy(Variables, ply.variables, sizeof(Variables));
+        Tempo = ply.tempo;
+        MasterVol = ply.masterVol;
+        NTracks = ply.nTracks;
+    }
+
+    bool Same(const SP::Player& ply) const
+    {
+        return !memcmp(Tracks, (const void*)ply.tracks, sizeof(Tracks)) && !memcmp(TrackIds, ply.trackIds, sizeof(TrackIds))
+            && !memcmp(Variables, ply.variables, sizeof(Variables)) && Tempo == ply.tempo && MasterVol == ply.masterVol
+            && NTracks == ply.nTracks;
+    }
+};
+
 struct ParkedVoice
 {
     int Key;
@@ -276,13 +310,11 @@ BgmRenderer::BgmRenderer() : P(std::make_unique<Impl>())
 
 BgmRenderer::~BgmRenderer() = default;
 
-bool BgmRenderer::Load(const u8* mml, u32 mmlLen,
-                       const u8* sbnk, u32 sbnkLen,
-                       const u8* const swar[4], const u32 swarLen[4])
+bool BgmRenderer::Load(const u8* mml, u32 mmlLen, std::vector<u8>& sbnk, std::vector<u8> (&swar)[4])
 {
     // Parsed into Loaded only: the playing song is not touched, so it keeps playing if this fails.
     std::unique_ptr<Song> song;
-    if (mml && mmlLen && sbnk && sbnkLen)
+    if (mml && mmlLen && !sbnk.empty())
     {
         song = std::make_unique<Song>();
         try
@@ -293,16 +325,15 @@ bool BgmRenderer::Load(const u8* mml, u32 mmlLen,
             song->Seq.data.insert(song->Seq.data.end(), 16, 0xFF);
             song->Seq.bank = &song->Bank;
 
-            std::vector<u8> buf(sbnk, sbnk + sbnkLen);
             SP::PseudoFile file;
-            file.data = &buf;
+            file.data = &sbnk;
             song->Bank.Read(file);
 
             for (int i = 0; i < 4; i++)
             {
-                if (!swar[i] || !swarLen[i])
+                if (swar[i].empty())
                     continue;
-                buf.assign(swar[i], swar[i] + swarLen[i]);
+                file.data = &swar[i];
                 file.pos = 0;
                 song->WaveArc[i].Read(file);
                 song->Bank.waveArc[i] = &song->WaveArc[i];
@@ -339,9 +370,28 @@ void BgmRenderer::Start(u32 atTick)
 
     if (atTick > 0)
     {
+        // The loop period is found by comparing the state after a backward jump with the state after the
+        // previous backward jump of the same tracks; from there on, whole periods are skipped.
+        std::vector<SeqState> jumps;
+        bool looped = false;
         ply->skipNotes = true;
         while (ply->tickCounter + SeekFullSimTicks < atTick && !ply->seqEnded)
+        {
             ply->RunTick();
+            if (!ply->loopJumps || looped)
+                continue;
+            auto it = std::find_if(jumps.begin(), jumps.end(), [&](const SeqState& s) { return s.Jumps == ply->loopJumps; });
+            if (it != jumps.end() && it->Same(*ply))
+            {
+                u32 period = ply->tickCounter - it->Tick;
+                ply->tickCounter += (atTick - SeekFullSimTicks - ply->tickCounter) / period * period;
+                looped = true;
+            }
+            else if (it != jumps.end())
+                it->Save(*ply);
+            else if (jumps.size() < 4)
+                jumps.emplace_back().Save(*ply);
+        }
         ply->skipNotes = false;
 
         // Same per-period work as during playback, minus mixing. Bounded in case of tempo 0.

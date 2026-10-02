@@ -26,6 +26,7 @@
 #define BGMRENDERER_H
 
 #include <memory>
+#include <vector>
 #include "../types.h"
 
 namespace melonDS::Sound
@@ -40,11 +41,10 @@ public:
     // Load a sequence from raw blobs copied out of emulated main RAM.
     // mml: sequence data (what START_SEQ arg1 points at), mmlLen from the SSEQ header.
     // sbnk: whole SBNK file (what the bank pointer points at). swar[i]: whole SWAR files
-    // referenced by the SBNK header (nullptr/0 if slot unused). Returns false on parse failure.
+    // referenced by the SBNK header (empty if slot unused). Both are parsed in place, not changed.
+    // Returns false on parse failure.
     // The playing song is not affected (also on failure); Start() switches to the loaded one.
-    bool Load(const u8* mml, u32 mmlLen,
-              const u8* sbnk, u32 sbnkLen,
-              const u8* const swar[4], const u32 swarLen[4]);
+    bool Load(const u8* mml, u32 mmlLen, std::vector<u8>& sbnk, std::vector<u8> (&swar)[4]);
 
     // Start playback. If atTick > 0, the sequencer is first advanced silently to that
     // tick (SNDSharedWork tickCounter units: 48 ticks per quarter note) so the host

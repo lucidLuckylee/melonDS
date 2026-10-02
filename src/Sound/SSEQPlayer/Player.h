@@ -44,6 +44,7 @@ struct Player
 	bool seqEnded;
 	bool paused;
 	bool skipNotes; // fast seek: run the sequence without keying notes
+	uint32_t loopJumps; // tracks (bit per track id) that jumped back in the last RunTick, for the seek's loop detection
 
 	const SSEQ *sseq;
 

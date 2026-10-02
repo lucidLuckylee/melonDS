@@ -573,8 +573,13 @@ void Track::Run()
 					break;
 
 				case SSEQ_CMD_GOTO:
+				{
+					const uint8_t *from = *pData;
 					*pData = DataAt(this->ply, read24(pData));
+					if (*pData < from)
+						this->ply->loopJumps |= 1u << this->trackId;
 					break;
+				}
 
 				case SSEQ_CMD_CALL:
 					value = read24(pData);

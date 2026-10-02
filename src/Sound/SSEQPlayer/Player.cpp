@@ -16,7 +16,7 @@ namespace melonDS::Sound::SSEQPlayer
 
 
 Player::Player() : prio(0), nTracks(0), tempo(0), tempoCount(0), tempoRate(0), masterVol(0), extFader(0), trackMute(0), outputVol(128), channelMask(0xFFFF),
-	tickCounter(0), seqEnded(false), paused(false), skipNotes(false), sseq(nullptr), sampleRate(32768), interpolation(INTERPOLATION_NONE),
+	tickCounter(0), seqEnded(false), paused(false), skipNotes(false), loopJumps(0), sseq(nullptr), sampleRate(32768), interpolation(INTERPOLATION_NONE),
 	secondsPerSample(1.0 / 32768), secondsIntoPlayback(0), secondsUntilNextClock(SecondsPerClockCycle)
 {
 	memset(this->trackIds, 0, sizeof(this->trackIds));
@@ -160,6 +160,7 @@ void Player::RunTick()
 {
 	if (this->seqEnded)
 		return;
+	this->loopJumps = 0;
 	bool anyActive = false;
 	for (uint8_t i = 0; i < this->nTracks; ++i)
 	{

@@ -534,16 +534,8 @@ bool SndCmdTracker::EnterHostMode(int player, bool fromStart)
         }
     }
 
-    const u8* swarPtr[4];
-    u32 swarLen[4];
-    for (int i = 0; i < 4; i++)
-    {
-        swarPtr[i] = swar[i].empty() ? nullptr : swar[i].data();
-        swarLen[i] = (u32)swar[i].size();
-    }
-
     // the current host keeps playing if this player cannot be loaded
-    if (!ok || !Bgm.Load(mml.data(), s.MMLLen, sbnk.data(), (u32)sbnk.size(), swarPtr, swarLen))
+    if (!ok || !Bgm.Load(mml.data(), s.MMLLen, sbnk, swar))
     {
         Log(LogLevel::Warn, "RealtimeBGM: could not load player %d (%s) into the host renderer\n", player,
             s.Info && !s.Info->Name.empty() ? s.Info->Name.c_str() : "?");
