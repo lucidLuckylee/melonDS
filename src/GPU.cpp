@@ -186,6 +186,17 @@ void GPU::Reset() noexcept
 
     GPU2D_A.Reset();
     GPU2D_B.Reset();
+
+    // the renderer reset starts a 3D render for the first frame
+    FrameSkipCounter = 0;
+    RenderCurFrame = true;
+    RenderNextFrame = true;
+    Rendering3D = true;
+    Skipped3D = false;
+    LastFrameRendered = true;
+    ForceRender = false;
+    CaptureHistory = 0;
+
     GPU3D.Reset();
 
     int backbuf = FrontBuffer ? 0 : 1;
@@ -272,6 +283,15 @@ void GPU::DoSavestate(Savestate* file) noexcept
             VRAMPtr_BOBJ[i] = GetUniqueBankPtr(VRAMMap_BOBJ[i], i << 14);
     }
 
+    // the threaded software renderer starts a 3D render for the upcoming frame after loading
+    if (!file->Saving)
+    {
+        RenderCurFrame = true;
+        Rendering3D = true;
+    }
+    else
+        ForceRenderNextFrame();
+
     GPU2D_A.DoSavestate(file);
     GPU2D_B.DoSavestate(file);
     GPU3D.DoSavestate(file);
@@ -295,6 +315,10 @@ void GPU::AssignFramebuffers() noexcept
 
 void GPU::SetRenderer3D(std::unique_ptr<Renderer3D>&& renderer) noexcept
 {
+    // the renderer reset starts a 3D render for the upcoming frame
+    RenderCurFrame = true;
+    Rendering3D = true;
+
     if (renderer == nullptr)
         GPU3D.SetCurrentRenderer(std::make_unique<SoftRenderer>());
     else
@@ -882,31 +906,54 @@ void GPU::StartHBlank(u32 line) noexcept
 
     if (VCount < 192)
     {
+        // the capture latch is set when drawing VCount 0, so capture enabled
+        // right before that must not be skipped either
+        if (!RenderCurFrame && VCount == 0 && (GPU2D_A.CaptureCnt & (1<<31)))
+            RenderSkippedFrame();
+
         // draw
         // note: this should start 48 cycles after the scanline start
-        if (line < 192)
+        if (RenderCurFrame)
         {
-            GPU2D_Renderer->DrawScanline(line, &GPU2D_A);
-            GPU2D_Renderer->DrawScanline(line, &GPU2D_B);
-        }
+            if (line < 192)
+            {
+                GPU2D_Renderer->DrawScanline(line, &GPU2D_A);
+                GPU2D_Renderer->DrawScanline(line, &GPU2D_B);
+            }
 
-        // sprites are pre-rendered one scanline in advance
-        if (line < 191)
-        {
-            GPU2D_Renderer->DrawSprites(line+1, &GPU2D_A);
-            GPU2D_Renderer->DrawSprites(line+1, &GPU2D_B);
+            // sprites are pre-rendered one scanline in advance
+            if (line < 191)
+            {
+                GPU2D_Renderer->DrawSprites(line+1, &GPU2D_A);
+                GPU2D_Renderer->DrawSprites(line+1, &GPU2D_B);
+            }
         }
 
         NDS.CheckDMAs(0, 0x02);
     }
     else if (VCount == 215)
     {
-        GPU3D.VCount215(*this);
+        // the 3D render for the next frame starts here, so this is where frameskip
+        // decides whether the next frame is rendered
+        FrameSkipCounter++;
+        RenderNextFrame = (FrameSkipCounter >= FrameSkipInterval) || ForceRender ||
+                          CaptureHistory || (GPU2D_A.CaptureCnt & (1<<31));
+        if (RenderNextFrame)
+        {
+            FrameSkipCounter = 0;
+            ForceRender = false;
+            Start3DFrame();
+        }
+        else
+            Skipped3D = true;
     }
     else if (VCount == 262)
     {
-        GPU2D_Renderer->DrawSprites(0, &GPU2D_A);
-        GPU2D_Renderer->DrawSprites(0, &GPU2D_B);
+        if (RenderNextFrame)
+        {
+            GPU2D_Renderer->DrawSprites(0, &GPU2D_A);
+            GPU2D_Renderer->DrawSprites(0, &GPU2D_B);
+        }
     }
 
     if (DispStat[0] & (1<<4)) NDS.SetIRQ(0, IRQ_HBlank);
@@ -920,16 +967,57 @@ void GPU::StartHBlank(u32 line) noexcept
 
 void GPU::FinishFrame(u32 lines) noexcept
 {
-    FrontBuffer = FrontBuffer ? 0 : 1;
-    AssignFramebuffers();
+    // a skipped frame leaves the last rendered picture in the front buffer
+    if (RenderCurFrame)
+    {
+        FrontBuffer = FrontBuffer ? 0 : 1;
+        AssignFramebuffers();
+    }
+    LastFrameRendered = RenderCurFrame;
 
     TotalScanlines = lines;
 
     if (GPU3D.AbortFrame)
     {
+        // the restart redoes the 3D render of the next frame, if it is rendered
+        Rendering3D = RenderNextFrame;
         GPU3D.RestartFrame(*this);
         GPU3D.AbortFrame = false;
     }
+
+    RenderCurFrame = RenderNextFrame;
+    CaptureHistory = (CaptureHistory << 1) & 0x3;
+}
+
+void GPU::SetFrameSkip(int renderEveryN) noexcept
+{
+    FrameSkipInterval = std::max(renderEveryN, 1);
+}
+
+void GPU::Start3DFrame() noexcept
+{
+    // the renderer's last output is older than the frame GPU3D compared
+    // the new one against, so the "frame identical" shortcut doesn't apply
+    if (Skipped3D)
+    {
+        GPU3D.RenderFrameIdentical = false;
+        Skipped3D = false;
+    }
+
+    Rendering3D = true;
+    GPU3D.VCount215(*this);
+}
+
+void GPU::RenderSkippedFrame() noexcept
+{
+    // render the frame that is starting although frameskip skipped it at VCount 215:
+    // start its 3D render now (texture changes after VCount 215 will show one frame early)
+    RenderCurFrame = true;
+    Start3DFrame();
+
+    // sprites are pre-rendered one scanline in advance
+    GPU2D_Renderer->DrawSprites(0, &GPU2D_A);
+    GPU2D_Renderer->DrawSprites(0, &GPU2D_B);
 }
 
 void GPU::BlankFrame() noexcept
@@ -947,6 +1035,7 @@ void GPU::BlankFrame() noexcept
     FrontBuffer = backbuf;
     AssignFramebuffers();
 
+    LastFrameRendered = true;
     TotalScanlines = 263;
 }
 
@@ -990,6 +1079,17 @@ void GPU::StartScanline(u32 line) noexcept
     else if (VCount == 194)
         NDS.StopDMAs(0, 0x03);
 
+    if (VCount == 0)
+    {
+        if (GPU2D_A.CaptureCnt & (1<<31))
+            CaptureHistory |= 1;
+
+        // never skip a frame with display capture, the capture writes to VRAM
+        if (!RenderCurFrame && ((GPU2D_A.CaptureCnt & (1<<31)) || ForceRender))
+            RenderSkippedFrame();
+        ForceRender = false;
+    }
+
     if (line < 192)
     {
         if (line == 0)
@@ -1020,7 +1120,11 @@ void GPU::StartScanline(u32 line) noexcept
             // texture memory anyway and only update it before the start
             //of the next frame.
             // So we can give the rasteriser a bit more headroom
-            GPU3D.VCount144(*this);
+            if (Rendering3D)
+            {
+                GPU3D.VCount144(*this);
+                Rendering3D = false;
+            }
 
             // VBlank
             DispStat[0] |= (1<<0);
@@ -1039,7 +1143,7 @@ void GPU::StartScanline(u32 line) noexcept
             GPU3D.VBlank();
 
             // Need a better way to identify the openGL renderer in particular
-            if (GPU3D.IsRendererAccelerated())
+            if (GPU3D.IsRendererAccelerated() && RenderCurFrame)
                 GPU3D.Blit(*this);
         }
     }

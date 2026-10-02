@@ -87,9 +87,10 @@ void SoftRenderer::SetupRenderThread(GPU& gpu)
     }
 }
 
-void SoftRenderer::EnableRenderThread()
+void SoftRenderer::EnableRenderThread(GPU& gpu)
 {
-    if (Threaded && Sema_RenderStart)
+    // with frameskip there may be no render in flight to (re)start
+    if (Threaded && Sema_RenderStart && gpu.Is3DRenderPending())
     {
         Platform::Semaphore_Post(Sema_RenderStart);
     }
@@ -125,7 +126,7 @@ void SoftRenderer::Reset(GPU& gpu)
     PrevIsShadowMask = false;
 
     SetupRenderThread(gpu);
-    EnableRenderThread();
+    EnableRenderThread(gpu);
 }
 
 void SoftRenderer::SetThreaded(bool threaded, GPU& gpu) noexcept
@@ -134,7 +135,7 @@ void SoftRenderer::SetThreaded(bool threaded, GPU& gpu) noexcept
     {
         Threaded = threaded;
         SetupRenderThread(gpu);
-        EnableRenderThread();
+        EnableRenderThread(gpu);
     }
 }
 
@@ -1765,7 +1766,7 @@ void SoftRenderer::RenderFrame(GPU& gpu)
 void SoftRenderer::RestartFrame(GPU& gpu)
 {
     SetupRenderThread(gpu);
-    EnableRenderThread();
+    EnableRenderThread(gpu);
 }
 
 void SoftRenderer::RenderThreadFunc(GPU& gpu)

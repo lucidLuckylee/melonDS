@@ -42,7 +42,7 @@ public:
     u32* GetLine(int line) override;
 
     void SetupRenderThread(GPU& gpu);
-    void EnableRenderThread();
+    void EnableRenderThread(GPU& gpu);
     void StopRenderThread();
 private:
     friend void GPU3D::DoSavestate(Savestate* file) noexcept;

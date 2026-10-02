@@ -558,7 +558,7 @@ void GPU3D::DoSavestate(Savestate* file) noexcept
     RenderFrameIdentical = false;
     if (softRenderer && softRenderer->IsThreaded())
     {
-        softRenderer->EnableRenderThread();
+        softRenderer->EnableRenderThread(NDS.GPU);
     }
 }
 
