@@ -1252,6 +1252,15 @@ int SPU::ReadOutput(s16* data, int samples)
 {
     Platform::Mutex_Lock(AudioLock);
     CountRead(samples);
+    // fast-forward just ended: what the stretched reads left in the ring would play late at 1x
+    // (and hold up audio sync), so keep only the newest callback's worth
+    if (Stretching)
+    {
+        Stretching = false;
+        u32 mask = (2*OutputBufferSize)-1;
+        if (((OutputBufferWritePos - OutputBufferReadPos) & mask) > (u32)samples * 2)
+            OutputBufferReadPos = (OutputBufferWritePos - samples * 2) & mask;
+    }
     Platform::Mutex_Unlock(AudioLock);
     return ReadRing(data, samples);
 }
@@ -1286,14 +1295,11 @@ int SPU::ReadOutputStretched(s16* data, int outFrames, double speedRatio)
 {
     // close enough to 1x: behave exactly like ReadOutput
     if (std::fabs(speedRatio - 1.0) < 0.01)
-    {
-        Stretching = false;
         return ReadOutput(data, outFrames);
-    }
 
-    // keep the ring well ahead of what a stretched read can ask for, and at
-    // least ~1 second, so high ratios don't run into it wrapping underneath us
-    GrowOutputBuffer(std::max<u32>((u32) std::ceil(outFrames * speedRatio) * 2, (u32) std::ceil(OutputSampleRate)));
+    // room for twice what a stretched read can ask for; an emulator faster than that overwrites the
+    // oldest audio instead of building up a backlog
+    GrowOutputBuffer((u32) std::ceil(outFrames * speedRatio) * 2);
 
     // an emulator slower than speedRatio cannot keep up with it: pull at most what the ring holds beyond
     // one callback's worth, so sound effects play slower instead of underrunning
