@@ -22,6 +22,7 @@
 
 #include <math.h>
 #include <algorithm>
+#include <atomic>
 #include <mutex>
 #include <vector>
 #include <string.h>
@@ -194,6 +195,11 @@ struct BgmRenderer::Impl : SongParams
     double OutputSkew = 1;
     SP::Interpolation Interp = SP::INTERPOLATION_NONE;
 
+    // Playing(), Active() and Tick() for the emu thread, which must not wait for a Render() to finish:
+    // stored under Lock whenever what they summarise may have changed, read without it
+    std::atomic<bool> PlayingNow {false}, ActiveNow {false};
+    std::atomic<u32> TickNow {0};
+
     std::shared_ptr<Song> Loaded;
     std::vector<ParkedVoice> Parked;  // oldest first
     u8 MasterVolume = 127; // hardware setting, survives Load()
@@ -237,6 +243,15 @@ struct BgmRenderer::Impl : SongParams
         Out.ReleaseSeconds = fadeMs / 1000.0;
         OutActive = true;
         return old;
+    }
+
+    // Under Lock
+    void Publish()
+    {
+        bool cur = Playing && !Cur.Ply->Finished();
+        PlayingNow.store(cur, std::memory_order_relaxed);
+        ActiveNow.store(cur || OutActive, std::memory_order_relaxed);
+        TickNow.store(Cur.Ply->tickCounter, std::memory_order_relaxed);
     }
 
     void ApplyParams(SP::Player& ply) const
@@ -350,6 +365,7 @@ void BgmRenderer::Start(u32 atTick)
         P->Cur.Gain = atTick > 0 ? 0 : 1;
         P->Cur.GainRate = atTick > 0 ? 1 / FadeInSeconds : 0;
         P->Playing = true;
+        P->Publish();
     }
 }
 
@@ -361,6 +377,7 @@ void BgmRenderer::Release(u32 fadeMs)
         if (!P->Playing || P->Cur.Ply->Finished())
         {
             P->Playing = false;
+            P->Publish();
             return;
         }
         rate = P->Rate();
@@ -377,6 +394,7 @@ void BgmRenderer::Release(u32 fadeMs)
         P->Cur.ResetFader(P->ExtFader);
         P->Cur.Gain = 1;
         P->Cur.GainRate = 0;
+        P->Publish();
     }
     // a previous outgoing voice is cut here, outside the lock
 }
@@ -396,6 +414,7 @@ void BgmRenderer::Kill()
         old = std::move(P->Out);
         for (auto& chn : P->Cur.Ply->channels)
             chn.Kill();
+        P->Publish();
     }
 }
 
@@ -429,6 +448,7 @@ void BgmRenderer::Park(int key)
         P->Cur.ResetFader(P->ExtFader);
         P->Cur.Gain = 1;
         P->Cur.GainRate = 0;
+        P->Publish();
     }
 
     // the driver releases the notes on pause; a parked voice renders nothing, so they end here
@@ -464,6 +484,7 @@ bool BgmRenderer::Unpark(int key)
             old = std::move(P->Cur);
         P->Cur = std::move(slot.V);
         P->Playing = true;
+        P->Publish();
     }
     return true;
 }
@@ -482,20 +503,17 @@ void BgmRenderer::DropAllParked()
 
 bool BgmRenderer::Active() const
 {
-    std::lock_guard<std::mutex> lock(P->Lock);
-    return (P->Playing && !P->Cur.Ply->Finished()) || P->OutActive;
+    return P->ActiveNow.load(std::memory_order_relaxed);
 }
 
 bool BgmRenderer::Playing() const
 {
-    std::lock_guard<std::mutex> lock(P->Lock);
-    return P->Playing && !P->Cur.Ply->Finished();
+    return P->PlayingNow.load(std::memory_order_relaxed);
 }
 
 u32 BgmRenderer::Tick() const
 {
-    std::lock_guard<std::mutex> lock(P->Lock);
-    return P->Cur.Ply->tickCounter;
+    return P->TickNow.load(std::memory_order_relaxed);
 }
 
 // extFader is in the driver's centibel (0.1 dB) volume units and is added straight onto the
@@ -666,6 +684,7 @@ void BgmRenderer::Render(s16* stereo, int frames)
         if (P->Out.OutgoingDone())
             P->OutActive = false;
     }
+    P->Publish();
 }
 
 }
