@@ -369,7 +369,7 @@ public: // TODO: Encapsulate the rest of these members
     [[nodiscard]] const NDSCart::CartCommon* GetNDSCart() const { return NDSCartSlot.GetCart(); }
     virtual void SetNDSCart(std::unique_ptr<NDSCart::CartCommon>&& cart);
     [[nodiscard]] bool CartInserted() const noexcept { return NDSCartSlot.GetCart() != nullptr; }
-    virtual std::unique_ptr<NDSCart::CartCommon> EjectCart() { return NDSCartSlot.EjectCart(); }
+    virtual std::unique_ptr<NDSCart::CartCommon> EjectCart() { SndTracker.OnCartChanged(nullptr, 0); return NDSCartSlot.EjectCart(); }
 
     [[nodiscard]] u8* GetNDSSave() { return NDSCartSlot.GetSaveMemory(); }
     [[nodiscard]] const u8* GetNDSSave() const { return NDSCartSlot.GetSaveMemory(); }

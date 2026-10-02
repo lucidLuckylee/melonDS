@@ -53,7 +53,7 @@ public:
     void Reset();                               // on NDS reset
     void DoSavestate(melonDS::Savestate* file);
 
-    // Called by NDS::SetNDSCart with the full ROM image (may be nullptr on eject).
+    // Called by NDS::SetNDSCart with the full ROM image, and by NDS::EjectCart with nullptr.
     void OnCartChanged(const u8* rom, u32 romLen);
 
     // Called from NDS::ARM9IOWrite32 for every word written to IPCFIFOSEND (0x04000188).
