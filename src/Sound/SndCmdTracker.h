@@ -133,6 +133,7 @@ private:
     u32 SharedWork = 0;           // ARM9 address of SNDSharedWork
     u32 DriverInfoAddr = 0;       // ARM9 address of the last READ_DRIVER_INFO buffer
     bool DriverInfoPending = false;
+    std::vector<u8> DriverInfoBuf;   // ParseDriverInfo's copy of the snapshot
     std::array<s8, 16> ChanOwner {};   // per SPU channel: driver player, -1 unknown (from driver info)
     bool ChanOwnerValid = false;
     u32 LiveWork = 0;             // ARM7 address of the driver's SNDWork, validated by ParseDriverInfo
