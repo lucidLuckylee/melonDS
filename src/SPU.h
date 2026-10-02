@@ -296,9 +296,11 @@ private:
     double OutputSkew = 1.0;
     melonDS::NDS& NDS;
 
+    // audio thread only, except StretchInit (under AudioLock)
     Sound::TimeStretch Stretcher;
     std::vector<s16> StretchScratch;
     bool Stretching = false;        // the last ReadOutputStretched call stretched
+    bool StretchInit = true;        // InitOutput ran: the stretcher is set up for the output rate before its next use
 
     // under AudioLock: frames buffered and read in the current window, and the last window's ratio
     u32 FramesProduced = 0;
