@@ -1,5 +1,5 @@
 /*
-    Copyright 2016-2025 melonDS team
+    Copyright 2016-2026 melonDS team
 
     This file is part of melonDS.
 
@@ -18,6 +18,7 @@
 
 #include "OpenGLSupport.h"
 
+#include <regex>
 #include <unordered_map>
 #include <vector>
 
@@ -315,6 +316,35 @@ error:
     return linkingSucess;
 }
 
+// ANDROID: the shaders are written in desktop GLSL 1.40. Turn them into GLSL ES 3.20 by replacing
+// the version line and adding default precisions. GLES has no glBindFragDataLocation, so the
+// fragment outputs get explicit locations in the source instead.
+static std::string ConvertShaderToGLES(const std::string& source, const std::initializer_list<AttributeTarget>& fragmentOutAttrs)
+{
+    std::string ret = "#version 320 es\n"
+        "precision highp float;\n"
+        "precision highp int;\n"
+        "precision highp sampler2D;\n"
+        "precision highp isampler2D;\n"
+        "precision highp usampler2D;\n"
+        "precision highp sampler2DArray;\n"
+        "precision highp isampler2DArray;\n"
+        "precision highp usampler2DArray;\n"
+        "precision highp samplerBuffer;\n"
+        "precision highp isamplerBuffer;\n"
+        "precision highp usamplerBuffer;\n";
+
+    ret += source.substr(source.find('\n') + 1);
+
+    for (const AttributeTarget& target : fragmentOutAttrs)
+    {
+        std::regex decl(std::string("(^|\n)(\\s*)out(\\s+\\w+\\s+") + target.Name + "\\s*;)");
+        ret = std::regex_replace(ret, decl, "$1$2layout(location = " + std::to_string(target.Location) + ") out$3");
+    }
+
+    return ret;
+}
+
 bool CompileVertexFragmentProgram(GLuint& result,
     const std::string& vs, const std::string& fs,
     const std::string& name,
@@ -330,10 +360,10 @@ bool CompileVertexFragmentProgram(GLuint& result,
 
     bool linkingSucess = false;
 
-    if (!CompilerShader(shaders[0], vs, name, "vertex"))
+    if (!CompilerShader(shaders[0], ConvertShaderToGLES(vs, {}), name, "vertex"))
         goto error;
 
-    if (!CompilerShader(shaders[1], fs, name, "fragment"))
+    if (!CompilerShader(shaders[1], ConvertShaderToGLES(fs, fragmentOutAttrs), name, "fragment"))
         goto error;
 
 
@@ -341,11 +371,6 @@ bool CompileVertexFragmentProgram(GLuint& result,
     {
         glBindAttribLocation(result, target.Location, target.Name);
     }
-    // ANDROID: Not supported by GLES. Shaders explicitly specify frag data location
-    // for (const AttributeTarget& target : fragmentOutAttrs)
-    // {
-    //     glBindFragDataLocation(result, target.Location, target.Name);
-    // }
 
     linkingSucess = LinkProgram(result, shaders, 2);
 

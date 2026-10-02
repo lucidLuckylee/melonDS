@@ -1,5 +1,5 @@
 /*
-    Copyright 2016-2025 melonDS team
+    Copyright 2016-2026 melonDS team
 
     This file is part of melonDS.
 
@@ -36,7 +36,9 @@ void EmuInstance::audioInit()
     audioVolume = localCfg.GetInt("Audio.Volume");
     audioDSiVolumeSync = localCfg.GetBool("Audio.DSiVolumeSync");
 
-    audioMuted = false;
+    audioMutedToggle = false;
+    audioMutedByFastForward = false;
+    audioMutedByWindowFocus = false;
     audioSyncCond = SDL_CreateCond();
     audioSyncLock = SDL_CreateMutex();
 
@@ -97,30 +99,40 @@ void EmuInstance::audioDeInit()
     micLock = nullptr;
 }
 
-void EmuInstance::audioMute()
+void EmuInstance::updateAudioMuteByWindowFocus()
 {
-    audioMuted = false;
+    audioMutedByWindowFocus = false;
     if (numEmuInstances() < 2) return;
 
     switch (mpAudioMode)
     {
         case 1: // only instance 1
-            if (instanceID > 0) audioMuted = true;
+            if (instanceID > 0) audioMutedByWindowFocus = true;
             break;
 
         case 2: // only currently focused instance
-            audioMuted = true;
+            audioMutedByWindowFocus = true;
             for (int i = 0; i < kMaxWindows; i++)
             {
                 if (!windowList[i]) continue;
                 if (windowList[i]->isFocused())
                 {
-                    audioMuted = false;
+                    audioMutedByWindowFocus = false;
                     break;
                 }
             }
             break;
     }
+}
+
+void EmuInstance::toggleAudioMute()
+{
+    audioMutedToggle = !audioMutedToggle;
+}
+
+void EmuInstance::updateFastForwardMute(bool fastForward)
+{
+    audioMutedByFastForward = fastForward && globalCfg.GetBool("MuteFastForward");
 }
 
 void EmuInstance::audioSync()
@@ -152,23 +164,51 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
     EmuInstance* inst = (EmuInstance*)data;
     len /= (sizeof(s16) * 2);
 
-    double skew = std::clamp(inst->targetFPS / INTERNAL_FRAME_RATE, 0.995, 1.005);
+    double skew = std::max(inst->targetFPS / INTERNAL_FRAME_RATE, 0.5);
     inst->nds->SPU.SetOutputSkew(skew);
 
-    int len_in = inst->audioGetNumSamplesOut(len);
-    if (len_in > inst->audioBufSize) len_in = inst->audioBufSize;
-    s16 buf_in[inst->audioBufSize*2];
+    // while fast-forwarding, time-stretch the SPU output (sound effects/cries; BGM is
+    // handled separately below) so it plays faster at its original pitch instead of
+    // being chopped by the ring buffer overwriting itself; it belongs to the real-time BGM feature
+    bool stretch = (inst->curFPS > inst->targetFPS) && inst->globalCfg.GetBool("Audio.FastForwardStretch")
+        && inst->globalCfg.GetBool("Audio.RealtimeBGM");
 
+    int len_in, num_in;
     SDL_LockMutex(inst->audioSyncLock);
-    int num_in = inst->nds->SPU.ReadOutput((s16*) stream, len_in);
+    if (stretch)
+    {
+        len_in = len;
+        num_in = inst->nds->SPU.ReadOutputStretched((s16*) stream, len, inst->curFPS / inst->targetFPS);
+    }
+    else
+    {
+        len_in = inst->audioGetNumSamplesOut(len);
+        if (len_in > inst->audioBufSize) len_in = inst->audioBufSize;
+        num_in = inst->nds->SPU.ReadOutput((s16*) stream, len_in);
+    }
     SDL_CondSignal(inst->audioSyncCond);
     SDL_UnlockMutex(inst->audioSyncLock);
 
-    if ((num_in < 1) || inst->audioMuted)
+    // RealtimeBGM: the host BGM renderer is paced by the audio device, so it renders exactly `len` frames
+    // per callback, also when the SPU has nothing; it keeps running while muted so it stays in time with the game
+    Sound::BgmRenderer& bgm = inst->nds->SndTracker.Renderer();
+    bool bgmActive = bgm.Active();
+    thread_local std::vector<s16> bgmbuf;
+    if (bgmActive)
+    {
+        bgmbuf.resize(len * 2);
+        bgm.SetOutputRate(inst->audioFreq);
+        bgm.Render(bgmbuf.data(), len);
+    }
+
+    if (((num_in < 1) && !bgmActive) || inst->audioMutedByWindowFocus || inst->audioMutedToggle || inst->audioMutedByFastForward)
     {
         memset(stream, 0, len*sizeof(s16)*2);
         return;
     }
+
+    if (num_in < 1)
+        memset(stream, 0, len*sizeof(s16)*2);
 
     if (inst->audioVolume < 256)
     {
@@ -177,13 +217,22 @@ void EmuInstance::audioCallback(void* data, Uint8* stream, int len)
             samples[i] = ((s32) samples[i] * inst->audioVolume) >> 8;
     }
 
-    int margin = 6;
-    if (num_in < len_in-margin)
+    if (num_in >= 1 && num_in < len_in)
     {
         int last = num_in-1;
 
-        for (int i = num_in; i < len_in-margin; i++)
+        for (int i = num_in; i < len_in; i++)
             ((u32*)stream)[i] = ((u32*)stream)[last];
+    }
+
+    if (bgmActive)
+    {
+        s16* samples = (s16*) stream;
+        for (int i = 0; i < len * 2; i++)
+        {
+            s32 val = samples[i] + (((s32) bgmbuf[i] * inst->audioVolume) >> 8);
+            samples[i] = (s16) std::clamp(val, -0x8000, 0x7FFF);
+        }
     }
 }
 
@@ -496,6 +545,16 @@ void EmuInstance::audioUpdateSettings()
 
     setupMicInputData();
     if (micStarted) micOpen();
+}
+
+void EmuInstance::updateRealtimeBgmSettings()
+{
+    if (nds == nullptr) return;
+
+    nds->SndTracker.Settings.Enabled = globalCfg.GetBool("Audio.RealtimeBGM");
+    // the host renderer follows the hardware path's interpolation and speed skew so a handover is seamless
+    nds->SndTracker.Settings.Interpolation = globalCfg.GetInt("Audio.Interpolation");
+    nds->SndTracker.Settings.OutputSkew = std::max(targetFPS / INTERNAL_FRAME_RATE, 0.5);
 }
 
 void EmuInstance::audioEnable()

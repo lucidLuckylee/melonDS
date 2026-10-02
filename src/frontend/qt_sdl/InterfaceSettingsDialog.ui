@@ -90,6 +90,34 @@
         </property>
        </widget>
       </item>
+      <item>
+       <widget class="QCheckBox" name="cbMuteFastForward">
+        <property name="text">
+         <string>Mute audio while fast forwarding</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="cbRealtimeBgm">
+        <property name="text">
+         <string>Keep background music at normal speed during fast-forward</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="cbFastForwardStretch">
+        <property name="text">
+         <string>Keep sound effects at original pitch during fast-forward</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QCheckBox" name="cbFastForwardFrameskip">
+        <property name="text">
+         <string>Skip rendering frames the display can't show during fast-forward</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
